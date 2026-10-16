@@ -24,7 +24,6 @@ class SimpleLpLoss(_WeightedLoss):
     def __init__(self, d=2, p=2, size_average=True, reduction=True,return_comps = False):
         super(SimpleLpLoss, self).__init__()
 
-        #Dimension and Lp-norm type are postive
         assert d > 0 and p > 0
 
         self.d = d
@@ -38,14 +37,11 @@ class SimpleLpLoss(_WeightedLoss):
     def forward(self, x, y, mask=None):
         num_examples = x.size()[0]
 
-        # Lp loss 1
-        if mask is not None:##TODO: will be meaned by n_channels for single channel data
+        if mask is not None:
             x = x * mask
             y = y * mask
 
-            ## compute effective channels
-            # msk_channels = mask.sum(dim=(1,2,3),keepdim=False).count_nonzero(dim=-1) # B, 1
-            msk_channels = mask.sum(dim=list(range(1, mask.ndim-1)),keepdim=False).count_nonzero(dim=-1) # B, 1
+            msk_channels = mask.sum(dim=list(range(1, mask.ndim-1)),keepdim=False).count_nonzero(dim=-1)
         else:
             msk_channels = x.shape[-1]
 
@@ -54,19 +50,11 @@ class SimpleLpLoss(_WeightedLoss):
 
         if self.reduction:
             if self.size_average:
-                    return torch.mean(diff_norms/y_norms)          ## deprecated
+                    return torch.mean(diff_norms/y_norms)
             else:
-                return torch.sum(torch.sum(diff_norms/y_norms, dim=-1) / msk_channels)    #### go this branch
+                return torch.sum(torch.sum(diff_norms/y_norms, dim=-1) / msk_channels)
         else:
             return torch.sum(diff_norms/y_norms, dim=-1) / msk_channels
-        ## Lp loss 2, channel average
-        # diff_norms = torch.norm(x.reshape(num_examples, -1, x.shape[-1]) - y.reshape(num_examples, -1, x.shape[-1]),self.p, 1)
-        # y_norms = torch.norm(y.reshape(num_examples, -1, x.shape[-1]), self.p, 1)
-        # if self.reduction:
-        #     if self.size_average:
-        #         return torch.mean(diff_norms / y_norms)
-        #     else:
-        #         return torch.sum(torch.mean(diff_norms / y_norms,dim=1))  #### go this branch
         if self.return_comps:
             if self.size_average:
                 return torch.mean(diff_norms/y_norms,dim=0)
@@ -102,7 +90,6 @@ class LpLoss(_WeightedLoss):
 
     def forward(self, pred, target):
 
-        #### only for computing metrics
 
         loss, metrics = self._lp_losses(pred, target)
 
@@ -134,11 +121,9 @@ class RelLpLoss(_WeightedLoss):
             target_pool = (target.view(target.shape[0], -1, target.shape[-1]).abs()**self.p).sum(dim=1,keepdim=False)
             losses = (err_pool / target_pool)**(1/ self.p)
             if self.component == 'all':
-                # metrics = losses.mean(dim=0).clone().detach().cpu().numpy()
                 metrics = losses.mean(dim=0).unsqueeze(0).clone().cpu().detach().numpy()  # 1, n
 
             else:
-                # metrics = losses.mean().clone().detach().cpu().numpy()
                 metrics = losses.mean().unsqueeze(0).clone().cpu().detach().numpy()   # 1, 1
 
         else:
@@ -146,7 +131,6 @@ class RelLpLoss(_WeightedLoss):
             err_pool = ((pred - target[...,self.component]).view(pred.shape[0], -1, pred.shape[-1]).abs() ** self.p).sum(dim=1,keepdim=False)
             target_pool = (target.view(target.shape[0], -1, target.shape[-1])[...,self.component].abs() ** self.p).sum(dim=1, keepdim=False)
             losses = (err_pool / target_pool)**(1/ self.p)
-            # metrics = losses.mean().clone().detach().cpu().numpy()
             metrics = losses.mean().unsqueeze(0).clone().cpu().detach().numpy()
 
 
@@ -207,7 +191,6 @@ class Evaluator(_WeightedLoss):
 
 
         with torch.no_grad():
-            ### only for computing metrics
             if self.normalizer is not None:
                 pred, target = self.normalizer.transform(pred, component=self.component,inverse=True), self.normalizer.transform(target, inverse=True)
 
@@ -216,7 +199,6 @@ class Evaluator(_WeightedLoss):
                 pred, target = pred.unsqueeze(-1), target.unsqueeze(-1)
 
             metrics = {}
-            ## 1, C
             _pred, _target = pred.view(pred.shape[0], -1, pred.shape[-1]), target.view(target.shape[0], -1, target.shape[-1])
             nmae = ((_pred - _target).abs().sum(dim=1, keepdim=False) / (_target.abs().sum(dim=1, keepdim=False))).mean(dim=0, keepdim=True)
             nmse = torch.sqrt(((_pred - _target) ** 2).sum(dim=1, keepdim=False) / ((_target) ** 2).sum(dim=1, keepdim=False)).mean(dim=0, keepdim=True)
@@ -258,7 +240,6 @@ def compute_fourier_error(pred, target, iLow, iHigh, if_mean=False):
     idxs = target.size()
     nb, nc, nt = idxs[0], idxs[1], idxs[-1]
 
-    # RMSE
     err_mean = torch.sqrt(torch.mean((pred.view([nb, nc, -1, nt]) - target.view([nb, nc, -1, nt])) ** 2, dim=2))
     err_RMSE = torch.mean(err_mean, axis=0)
     nrm = torch.sqrt(torch.mean(target.view([nb, nc, -1, nt]) ** 2, dim=2))
@@ -343,21 +324,8 @@ def compute_fourier_error(pred, target, iLow, iHigh, if_mean=False):
     fmse_mid = torch.mean(_err_F[:, iLow:iHigh], dim=1).T  # middle freq
     fmse_high = torch.mean(_err_F[:, iHigh:], dim=1).T
 
-    # err_F = torch.zeros([nc, 3, nt]).to(pred.device)
-    # err_F[:, 0] += torch.mean(_err_F[:, :iLow], dim=1)  # low freq
-    # err_F[:, 1] += torch.mean(_err_F[:, iLow:iHigh], dim=1)  # middle freq
-    # err_F[:, 2] += torch.mean(_err_F[:, iHigh:], dim=1)  # high freq
 
-    # if if_mean:
-    #     return torch.mean(err_RMSE, dim=[0, -1]), \
-    #            torch.mean(err_nRMSE, dim=[0, -1]), \
-    #            torch.mean(err_CSV, dim=[0, -1]), \
-    #            torch.mean(err_Max, dim=[0, -1]), \
-    #            torch.mean(err_BD, dim=[0, -1]), \
-    #            torch.mean(err_F, dim=[0, -1])
-    # else:
-    #     return err_RMSE, err_nRMSE, err_CSV, err_Max, err_BD, err_F
-    return err_BD, fmse_low, fmse_mid, fmse_high    ## T, C, ### T, C
+    return err_BD, fmse_low, fmse_mid, fmse_high    # T, C per metric
 
 
 
@@ -370,5 +338,3 @@ if __name__ == "__main__":
     evaluator = Evaluator(temporal=True, griddata=True, component='all', normalizer=None)
     metrics = evaluator(x, y)
     print(metrics)
-    # for key, value in metrics.items():
-    #     print(key, value.shape)

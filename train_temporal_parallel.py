@@ -25,18 +25,12 @@ from models.dpot import DPOTNet
 from models.dpot_res import CDPOTNet
 
 
-################################################################
-# EMA (Exponential Moving Average)
-# Maintains a smoothed version of model parameters for better inference
-################################################################
 class EMA:
     """
     Exponential Moving Average for model parameters.
 
     EMA maintains a smoothed version of model weights:
         θ_ema = decay * θ_ema + (1 - decay) * θ_current
-
-    This reduces parameter oscillation and often improves test performance by 0.5-2%.
     """
 
     def __init__(self, model, decay=0.999):
@@ -49,7 +43,6 @@ class EMA:
         self.shadow = {}
         self.backup = {}
 
-        # Initialize shadow parameters with current model parameters
         for name, param in model.named_parameters():
             if param.requires_grad:
                 self.shadow[name] = param.data.clone()
@@ -82,10 +75,6 @@ class EMA:
         return self.shadow.copy()
 
 
-################################################################
-# Spectrum-Aware Noise Injection
-# Low-frequency noise is more physically realistic for PDEs
-################################################################
 def spectrum_aware_noise(xx, noise_scale, decay_power=2.0):
     """
     Generate spectrum-aware noise: higher weight for low frequencies, lower for high frequencies.
@@ -104,13 +93,10 @@ def spectrum_aware_noise(xx, noise_scale, decay_power=2.0):
     B, X, Y, T, C = xx.shape
     device = xx.device
 
-    # Compute Frobenius norm of input
     xx_norm = torch.sum(xx**2, dim=(1,2,3), keepdim=True)**0.5  # (B, 1, 1, 1, C)
 
-    # Generate random noise
     noise = torch.randn_like(xx)  # (B, X, Y, T, C)
 
-    # Apply 2D FFT on spatial dimensions (X, Y)
     # Permute to (B, T, C, X, Y) for rfft2 on last two dims
     noise_permuted = noise.permute(0, 3, 4, 1, 2)  # (B, T, C, X, Y)
     noise_freq = torch.fft.rfft2(noise_permuted, dim=(-2, -1), norm="ortho")
@@ -118,7 +104,6 @@ def spectrum_aware_noise(xx, noise_scale, decay_power=2.0):
 
     H_freq, W_freq = noise_freq.shape[-2], noise_freq.shape[-1]
 
-    # Create radial frequency weight matrix
     # Low frequency (near origin) gets higher weight, high frequency gets lower weight
     ky = torch.arange(H_freq, device=device).float()
     kx = torch.arange(W_freq, device=device).float()
@@ -127,37 +112,25 @@ def spectrum_aware_noise(xx, noise_scale, decay_power=2.0):
     ky_grid, kx_grid = torch.meshgrid(ky, kx, indexing='ij')
     radius = torch.sqrt(ky_grid**2 + kx_grid**2)
 
-    # Frequency weight: 1 / (1 + r^decay_power)
-    # At r=0 (DC): weight=1, at high r: weight→0
     freq_weight = 1.0 / (1.0 + radius ** decay_power)
     freq_weight = freq_weight.view(1, 1, 1, H_freq, W_freq)  # (1, 1, 1, H, W//2+1)
 
-    # Apply frequency weighting
     noise_freq_weighted = noise_freq * freq_weight
 
-    # Inverse FFT back to spatial domain
     noise_filtered = torch.fft.irfft2(noise_freq_weighted, s=(X, Y), dim=(-2, -1), norm="ortho")
     # noise_filtered shape: (B, T, C, X, Y)
 
-    # Restore original dimension order
     noise_filtered = noise_filtered.permute(0, 3, 4, 1, 2)  # (B, X, Y, T, C)
 
     # Renormalize noise to maintain similar energy as original isotropic noise
     noise_filtered_norm = torch.sum(noise_filtered**2, dim=(1,2,3), keepdim=True)**0.5 + 1e-8
-    # Scale to match expected noise magnitude
     noise_normalized = noise_filtered * (torch.sum(torch.randn_like(xx)**2, dim=(1,2,3), keepdim=True)**0.5 / noise_filtered_norm)
 
-    # Inject noise
     return xx + noise_scale * xx_norm * noise_normalized
 
 
 
 
-
-################################################################
-# configs
-# CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7" accelerate launch --num_processes 8 --multi_gpu --main_process_port 5005 train_temporal_parallel.py
-################################################################
 
 def get_args():
     parser = argparse.ArgumentParser(description='Training or pretraining for the same data type')
@@ -176,21 +149,20 @@ def get_args():
 
     parser.add_argument('--res', type=int, default=64)
     parser.add_argument('--noise_scale',type=float, default=0.0)
-    # parser.add_argument('--n_channels',type=int,default=-1)
 
-    ### shared params
+    # Shared model parameters
     parser.add_argument('--width', type=int, default=32)
     parser.add_argument('--n_layers',type=int, default=4)
     parser.add_argument('--act',type=str, default='gelu')
 
 
-    ### FNO params
+    # FNO parameters
     parser.add_argument('--modes', type=int, default=16)
     parser.add_argument('--use_ln',type=int, default=1)
     parser.add_argument('--normalize',type=int, default=0)
 
 
-    ### AFNO
+    # AFNO parameters
     parser.add_argument('--patch_size',type=int, default=1)
     parser.add_argument('--n_blocks',type=int, default=8)
     parser.add_argument('--mlp_ratio', type=int, default=1)
@@ -202,19 +174,15 @@ def get_args():
     parser.add_argument('--sinkhorn_iter', type=int, default=20, help='Number of Sinkhorn iterations for mHC')
     parser.add_argument('--alpha_init', type=float, default=0.01, help='Initial value for mHC gating scalars')
 
-    # Spectrum-aware noise injection parameters
     parser.add_argument('--adaptive_noise', type=int, default=0, help='Use spectrum-aware noise (0=isotropic, 1=spectrum-aware)')
     parser.add_argument('--noise_decay_power', type=float, default=2.0, help='Frequency decay power for spectrum-aware noise')
 
-    # EMA (Exponential Moving Average) parameters
     parser.add_argument('--use_ema', type=int, default=0, help='Use EMA for model parameters (0=False, 1=True)')
     parser.add_argument('--ema_decay', type=float, default=0.999, help='EMA decay rate (0.999 means ~1000 steps averaging)')
 
-    # Normalization enhancement parameters
     parser.add_argument('--complex_norm', type=int, default=0, help='Use ComplexGroupNorm in AFNO2D frequency domain (0=False, 1=True)')
     parser.add_argument('--sandwich_norm', type=int, default=0, help='Use Sandwich-Norm (pre+post norm) in Block/MHCBlock (0=False, 1=True)')
 
-    # Layer Scale and Frequency-Aware Residual parameters
     parser.add_argument('--use_layer_scale', type=int, default=0, help='Use Layer Scale (learnable scaling on residual branches) (0=False, 1=True)')
     parser.add_argument('--use_far', type=int, default=0, help='Use Frequency-Aware Residual (different residual weights for different frequencies) (0=False, 1=True)')
 
@@ -233,10 +201,7 @@ def get_args():
     parser.add_argument('--S', type=int, default=64)
     parser.add_argument('--T_in', type=int, default=10)
     parser.add_argument('--T_ar', type=int, default=1)
-    # parser.add_argument('--T_ar_test', type=int, default=10)
     parser.add_argument('--T_bundle', type=int, default=1)
-    # parser.add_argument('--T', type=int, default=20)
-    # parser.add_argument('--step', type=int, default=1)
     parser.add_argument('--comment',type=str, default="")
     parser.add_argument('--log_path',type=str,default='')
     args = parser.parse_args()
@@ -253,9 +218,6 @@ if __name__ == "__main__":
 
 
 
-    ################################################################
-    # load data and dataloader
-    ################################################################
     train_paths = args.train_paths
 
     test_paths = args.test_paths
@@ -269,9 +231,6 @@ if __name__ == "__main__":
     test_loaders = [torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, drop_last=False, shuffle=False,num_workers=8) for test_dataset in test_datasets]
     ntrain, ntests = len(train_dataset), [len(test_dataset) for test_dataset in test_datasets]
     print('Train num {} test num {}'.format(train_dataset.n_sizes, ntests))
-    ################################################################
-    # load model
-    ################################################################
     if args.model == "FNO":
         model = FNO2d(args.modes, args.modes, args.width, img_size = args.res, patch_size=args.patch_size, in_timesteps = args.T_in, out_timesteps=1,normalize=args.normalize,n_layers = args.n_layers,use_ln = args.use_ln, n_channels=train_dataset.n_channels, n_cls=len(args.train_paths)).to(device)
     elif args.model == 'DPOT':
@@ -291,10 +250,8 @@ if __name__ == "__main__":
 
     if args.resume_path:
         print('Loading models and fine tune from {}'.format(args.resume_path))
-        # model.load_state_dict(torch.load(args.resume_path,map_location='cuda:{}'.format(args.gpu))['model'])
         load_model_from_checkpoint(model, torch.load(args.resume_path, map_location='cpu')['model'])
 
-    #### set optimizer
     if args.opt == 'lamb':
         optimizer = Lamb(model.parameters(), lr=args.lr, betas = (args.beta1, args.beta2), adam=True, debias=False,weight_decay=1e-4)
     else:
@@ -337,19 +294,14 @@ if __name__ == "__main__":
     count_parameters(model)
 
 
-    ##multi-gpu
     model, optimizer, scheduler, train_loader, *test_loaders = accelerator.prepare(model, optimizer, scheduler, train_loader, *test_loaders)
 
-    # Initialize EMA if enabled
     ema = None
     if args.use_ema:
         ema = EMA(model, decay=args.ema_decay)
         if accelerator.is_main_process:
             print(f'Using EMA with decay={args.ema_decay}')
 
-    ################################################################
-    # Main function for pretraining
-    ################################################################
     myloss = SimpleLpLoss(size_average=False)
     clsloss = torch.nn.CrossEntropyLoss(reduction='sum')
     iter = 0
@@ -376,23 +328,19 @@ if __name__ == "__main__":
             cls = cls.to(device)
 
 
-            ## auto-regressive training loop, support 1. noise injection, 2. long rollout backward, 3. temporal bundling prediction
+            # Autoregressive rollout with temporal bundling.
             for t in range(0, yy.shape[-2], args.T_bundle):
                 y = yy[..., t:t + args.T_bundle, :]
 
-                ### auto-regressive training with noise injection
                 if args.noise_scale > 0:
                     if args.adaptive_noise:
-                        # Spectrum-aware noise: low-frequency dominant
                         xx = xx + args.noise_scale * torch.sum(xx**2, dim=(1,2,3), keepdim=True)**0.5 * torch.randn_like(xx)
                     else:
-                        # Original isotropic noise
                         xx = xx + args.noise_scale * torch.sum(xx**2, dim=(1,2,3), keepdim=True)**0.5 * torch.randn_like(xx)
 
                 im, cls_pred = model(xx)
                 loss += myloss(im, y, mask=msk)
 
-                ### classification
                 pred_labels = torch.argmax(cls_pred,dim=1)
                 cls_loss += clsloss(cls_pred, cls.squeeze())
                 cls_correct += (pred_labels == cls.squeeze()).sum().item()
@@ -409,18 +357,14 @@ if __name__ == "__main__":
             train_l2_full += l2_full.item()
 
             optimizer.zero_grad()
-            # avg_loss = loss / xx.shape[0]
-            # avg_loss.backward()
             # Include cls_pred in computation graph to avoid DDP unused parameter error
             # The 0.0 coefficient ensures it doesn't affect the actual loss value
             total_loss = loss + 0.0 * cls_pred.sum()
             accelerator.backward(total_loss)
-            # total_loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
             optimizer.step()
             scheduler.step()
 
-            # Update EMA after each optimizer step
             if ema is not None:
                 ema.update(model)
 
@@ -431,8 +375,7 @@ if __name__ == "__main__":
                 writer.add_scalar("train_loss_step", loss.item()/(xx.shape[0] * yy.shape[-2] / args.T_bundle), iter)
                 writer.add_scalar("train_loss_full", l2_full / xx.shape[0], iter)
 
-                ## reset model
-                if loss.item() > 10 * loss_previous : # or (ep > 50 and l2_full / xx.shape[0] > 0.9):
+                if loss.item() > 10 * loss_previous :
                     print('loss explodes, loading model from previous epoch')
                     checkpoint = torch.load(model_path_fun(epoch= (ep//ckpt_save_epochs)),map_location='cuda:{}'.format(args.gpu))
                     model.load_state_dict(checkpoint['model'])
@@ -447,7 +390,6 @@ if __name__ == "__main__":
         test_l2_fulls, test_l2_steps = [], []
         model.eval()
         with torch.no_grad():
-            # model.eval()
             for id, test_loader in enumerate(test_loaders):
                 test_l2_full, test_l2_step, ntest = 0., 0., 0
                 for xx, yy, msk, _ in test_loader:
@@ -481,8 +423,7 @@ if __name__ == "__main__":
                     writer.add_scalar("test_loss_full_{}".format(test_paths[id]), test_l2_full_avg, ep)
 
         if args.use_writer:
-            # If EMA is enabled, save EMA parameters as 'model' for direct inference
-            # Otherwise, save the original model parameters
+            # Store EMA weights under 'model' for inference when EMA is enabled.
             if ema is not None:
                 model_state_to_save = ema.state_dict()
             else:
@@ -493,7 +434,5 @@ if __name__ == "__main__":
         t2 = t_1 = default_timer()
         lr = optimizer.param_groups[0]['lr']
         print('epoch {}, time {:.5f}, lr {:.2e}, train l2 step {:.5f} train l2 full {:.5f}, test l2 step {} test l2 full {}, cls acc {:.5f}, time train avg {:.5f} load avg {:.5f} test {:.5f}'.format(ep, t2 - t1, lr,train_l2_step_avg, train_l2_full_avg,', '.join(['{:.5f}'.format(val) for val in test_l2_steps]),', '.join(['{:.5f}'.format(val) for val in test_l2_fulls]), cls_acc, t_train / len(train_loader), t_load / len(train_loader), t_test))
-
-
 
 

@@ -24,17 +24,6 @@ beta2: 0.9
 n_channels: 4
 n_class: 12
 
-##########################################
-############ Pointwise MLP transform
-##########################################
-# add_mlp: 1
-# mlp_hidden: 4
-# freeze_mlp: 1
-# load_mlp_path: "/mnt/shared-storage-user/brainllm-share/lvqitan/brainllm2-share/lvqitan/fine_tune_mhc_mlp_medium_model/DPOT_ns2d_0419_10_46_40S_1_9000/model.pth"
-
-##########################################
-############ Tiny models
-##########################################
 resume_path: 'path to your pretrained ckpt'
 load_components: ['all']
 n_layers: 4
@@ -50,57 +39,6 @@ sandwich_norm: 0
 use_layer_scale: 0
 use_far: 0
 
-########################################
-##########  Small models (mHC)
-########################################
-## Uncomment below and comment Tiny section to use Small model
-#resume_path: '<SMALL_MODEL_PRETRAIN_PATH>'
-# load_components: ['all']
-# n_layers: 6
-# n_blocks: 8
-# mlp_ratio: 1
-# width: 1024
-# use_mhc: 0
-# n_streams: 4
-# sinkhorn_iter: 20
-# alpha_init: 0.01
-# complex_norm: 1
-# sandwich_norm: 1
-# use_layer_scale: 0
-# use_far: 0
-
-
-##########################################
-############  Medium models (mHC)
-##########################################
-## Uncomment below and comment Tiny section to use Medium model
-#resume_path: '<MEDIUM_MODEL_PRETRAIN_PATH>'
-# load_components: ['all']
-# n_layers: 12
-# n_blocks: 8
-# mlp_ratio: 4
-# width: 1024
-# use_mhc: 0
-# n_streams: 4
-# sinkhorn_iter: 20
-# alpha_init: 0.01
-# complex_norm: 1
-# sandwich_norm: 1
-# use_layer_scale: 0
-# use_far: 0
-
-#
-##########################################
-############  Large models
-##########################################
-#resume_path: 'logs_pretrain/DPOT_large_model.pth'
-#load_components: ['all']
-#n_layers: 24
-#n_blocks: 16
-#mlp_ratio: 4
-#width: 1536
-#out_layer_dim: 128
-
 tasks:
   comment: ['S']
 
@@ -111,20 +49,6 @@ tasks:
   # test_paths auto-mirrors train_paths via YAML anchor
   # ntrain_list auto-reads from DATASET_DICT when omitted
   train_paths: &paths [
-        # ['ns2d_fno_1e-5'],
         ['ns2d_fno_1e-4'],
-        # ['ns2d_fno_1e-3'],
-        # ['ns2d_pdb_M1_eta1e-1_zeta1e-1'],
-        # ['ns2d_pdb_M1_eta1e-2_zeta1e-2'],
-        # ['ns2d_pdb_M1e-1_eta1e-1_zeta1e-1'],
-        # ['ns2d_pdb_M1e-1_eta1e-2_zeta1e-2'],
-        # ['swe_pdb'],
-      #   ['dr_pdb'],
-      #   ['ns2d_pda'],
-        # ['ns2d_cond_pda'],
-        # ['cfdbench'],
-        # ['ns2d_custom'],
-        # ['nskt16k'],
-        # ['kolmogorov'],
   ]
   test_paths: *paths

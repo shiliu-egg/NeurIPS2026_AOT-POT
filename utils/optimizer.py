@@ -127,15 +127,11 @@ class Adam(Optimizer):
                     grads.append(p.grad)
 
                     state = self.state[p]
-                    # Lazy state initialization
                     if len(state) == 0:
                         state['step'] = 0
-                        # Exponential moving average of gradient values
                         state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                        # Exponential moving average of squared gradient values
                         state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                         if group['amsgrad']:
-                            # Maintains max of all exp. moving avg. of sq. grad. values
                             state['max_exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
                     exp_avgs.append(state['exp_avg'])
@@ -144,9 +140,7 @@ class Adam(Optimizer):
                     if group['amsgrad']:
                         max_exp_avg_sqs.append(state['max_exp_avg_sq'])
 
-                    # update the steps for each param group update
                     state['step'] += 1
-                    # record the step after step update
                     state_steps.append(state['step'])
 
             adam(params_with_grad,
@@ -296,15 +290,11 @@ class AdamW(Optimizer):
 
                 state = self.state[p]
 
-                # State initialization
                 if len(state) == 0:
                     state['step'] = 0
-                    # Exponential moving average of gradient values
                     state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    # Exponential moving average of squared gradient values
                     state['exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     if amsgrad:
-                        # Maintains max of all exp. moving avg. of sq. grad. values
                         state['max_exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
                 exp_avgs.append(state['exp_avg'])
@@ -313,9 +303,7 @@ class AdamW(Optimizer):
                 if amsgrad:
                     max_exp_avg_sqs.append(state['max_exp_avg_sq'])
 
-                # update the steps for each param group update
                 state['step'] += 1
-                # record the step after step update
                 state_steps.append(state['step'])
 
             adamw(params_with_grad,
@@ -351,7 +339,6 @@ State = Dict[str, Any]
 OptFloat = Optional[float]
 Nus2 = Tuple[float, float]
 
-# from .types import Betas2, OptFloat, OptLossClosure, Params
 
 __all__ = ("Lamb",)
 
@@ -444,14 +431,11 @@ class Lamb(Optimizer):
 
                 state = self.state[p]
 
-                # State initialization
                 if len(state) == 0:
                     state["step"] = 0
-                    # Exponential moving average of gradient values
                     state["exp_avg"] = torch.zeros_like(
                         p, memory_format=torch.preserve_format
                     )
-                    # Exponential moving average of squared gradient values
                     state["exp_avg_sq"] = torch.zeros_like(
                         p, memory_format=torch.preserve_format
                     )
@@ -462,9 +446,7 @@ class Lamb(Optimizer):
                 state["step"] += 1
 
                 # Decay the first and second moment running average coefficient
-                # m_t
                 exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
-                # v_t
                 exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
 
                 # Paper v3 does not use debiasing.

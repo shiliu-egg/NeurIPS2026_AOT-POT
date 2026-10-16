@@ -20,8 +20,6 @@ normalize: 0
 T_bundle: 1
 grad_clip: 10000.0
 
-
-
 train_paths: [
   'ns2d_fno_1e-5',
   'ns2d_fno_1e-4',
@@ -52,12 +50,6 @@ test_paths: [
 ]
 ntrain_list: [1000,9800,1000,9000,9000,9000,9000,900,900,6500,3100,9000]
 
-
-
-
-############################################################
-########## AOT-POT for multiple PDE datasets pretraining (Small)
-############################################################
 model: DPOT
 num_gpus: 8
 opt: adam
@@ -74,7 +66,6 @@ tasks:
   n_blocks: [8]
   n_layers: [6]
   lr: [0.001]
-  # resume_path: '/mnt/shared-storage-user/brainllm-share/lvqitan/brainllm2-share/lvqitan/·logs_pretrain/DPOT_ns2d_0313_14_21_46:S_12_132400_nb/model_20.pth'
   epochs: [5001]
   lr_method: [cycle]
   warmup_epochs: [200]
@@ -83,21 +74,15 @@ tasks:
   beta1: [0.9]
   beta2: [0.9]
   batch_size: [160]
-  # mHC (Manifold-Constrained Hyper-Connections) parameters
-  use_mhc: [1]           # 1 to enable mHC, 0 to disable
-  n_streams: [4]         # Number of parallel streams (paper uses 4)
-  sinkhorn_iter: [20]    # Sinkhorn iterations (paper uses 20)
-  alpha_init: [0.01]     # Gating scalar initialization (paper uses 0.01)
-  # Spectrum-aware noise injection parameters
-  adaptive_noise: [0]    # 1 to enable spectrum-aware noise, 0 for isotropic noise
-  noise_decay_power: [1]  # Frequency decay power (higher = faster high-freq decay)
-  # EMA (Exponential Moving Average) parameters
-  use_ema: [0]           # 1 to enable EMA, 0 to disable
-  ema_decay: [0.999]     # EMA decay rate (0.999 means ~1000 steps averaging window) 
-  # Normalization enhancement parameters
-  complex_norm: [1]      # 1 to enable ComplexGroupNorm in AFNO2D frequency domain, 0 to disable
-  sandwich_norm: [1]     # 1 to enable Sandwich-Norm (pre+post norm) in Block/MHCBlock, 0 to disable
-  # Layer Scale and Frequency-Aware Residual (small innovations)
-  use_layer_scale: [0]   # 1 to enable Layer Scale (learnable scaling on residual branches), 0 to disable
-  use_far: [0]           # adaptive low frequency filter
-
+  use_mhc: [1]
+  n_streams: [4]
+  sinkhorn_iter: [20]
+  alpha_init: [0.01]
+  adaptive_noise: [0]
+  noise_decay_power: [1]
+  use_ema: [0]
+  ema_decay: [0.999]
+  complex_norm: [1]
+  sandwich_norm: [1]
+  use_layer_scale: [0]
+  use_far: [0]

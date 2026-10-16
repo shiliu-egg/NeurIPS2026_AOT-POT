@@ -132,13 +132,7 @@ def load_components_from_pretrained(model, state_dict, components='all'):
                 model.patch_embed.load_state_dict(OrderedDict(
                     {k.replace('patch_embed.', ''): v for k, v in state_dict.items() if k.startswith('patch_embed.')}))
             elif name == 'pos' and hasattr(model, 'pos_embed'):
-                # model.pos_embed.load_state_dict(OrderedDict(
-                #     {k.replace('pos_embed.', ''): v for k, v in state_dict.items() if k.startswith('pos_embed.')}))
                 model.pos_embed = nn.Parameter(state_dict['pos_embed'])
-                # pos_embed_state = OrderedDict({k: v for k, v in state_dict.items() if k.startswith('pos_embed')})
-                # if pos_embed_state:
-                #     key, value = next(iter(pos_embed_state.items()))
-                #     setattr(model, 'pos_embed', value)
             elif name == 'blocks' and hasattr(model, 'blocks'):
                 for i, block in enumerate(model.blocks):
                     block_state_dict = OrderedDict({k.replace(f'blocks.{i}.', ''): v for k, v in state_dict.items() if
@@ -214,8 +208,6 @@ def save_results_excel(filename, data_dict):
             df.to_excel(writer, sheet_name=key, index=False)
 
 
-# -------------------------------------------------------------------------------------------------------
-# -------------------------------------------------------------------------------------------
 
 def samples_fft(u):
     return scipy.fft.fftn(u, s=u.shape[2:], norm='forward', workers=-1)
@@ -291,11 +283,9 @@ def resize(x, out_size, permute=False, temporal=False):
     bot_freqs2 = min(f.shape[-1], out_size[1] // 2 + 1)
     f_z[..., :top_freqs1, :top_freqs2] = f[..., :top_freqs1, :top_freqs2]
     f_z[..., -bot_freqs1:, :bot_freqs2] = f[..., -bot_freqs1:, :bot_freqs2]
-    # x_z = torch.fft.ifft2(f_z, s=out_size).real
     x_z = torch.fft.irfft2(f_z, s=out_size).real
     x_z = x_z * (out_size[0] / x.shape[-2]) * (out_size[1] / x.shape[-1])
 
-    # f_z[..., -f.shape[-2]//2:, :f.shape[-1]] = f[..., :f.shape[-2]//2+1, :]
 
     if temporal:
         x_z = rearrange(x_z, 'b (t c) x y -> b x y t c',t=T, c=C)
@@ -305,16 +295,9 @@ def resize(x, out_size, permute=False, temporal=False):
     return x_z
 
 
-# -------------------------------------------------------------------------------------------
-# -------------------------------------------------------------------------------------------
 
 
 if __name__ == "__main__":
-    # data_dict = {
-    #     'a': [[1, 2], [3, 4]],
-    #     'b': [[5, 6]]
-    # }
-    # save_results_excel('test.xlsx', data_dict)
     x = torch.rand(10,2,64,64)
     y = resize(x, [32, 32],permute=False)
     print(y.shape)

@@ -11,8 +11,6 @@ import torch.nn.functional as F
 import math
 import logging
 from models.filter_networks import LReLu_regular, LReLu_torch
-# from models.filter_networks import LReLu
-# from models.cno import CNOBlock
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
 
@@ -46,7 +44,6 @@ class CNOBlock(nn.Module):
         self.out_size = out_size
         self.conv_kernel = conv_kernel
 
-        # ---------- Filter properties -----------
         self.citically_sampled = False  # We use w_c = s/2.0001 --> NOT critically sampled
 
         if cutoff_den == 2.0:
@@ -57,9 +54,7 @@ class CNOBlock(nn.Module):
         self.in_halfwidth = half_width_mult * self.in_size - self.in_size / cutoff_den
         self.out_halfwidth = half_width_mult * self.out_size - self.out_size / cutoff_den
 
-        # -----------------------------------------
 
-        # We apply Conv -> BN (optional) -> Activation
         # Up/Downsampling happens inside Activation
 
         pad = (self.conv_kernel - 1) // 2
@@ -69,30 +64,16 @@ class CNOBlock(nn.Module):
 
 
         if activation == "cno_lrelu":
-            # self.activation = LReLu(in_channels=self.in_channels,  # In _channels is not used in these settings
-            #                         out_channels=self.out_channels,
-            #                         in_size=self.in_size,
-            #                         out_size=self.out_size,
-            #                         in_sampling_rate=self.in_size,
-            #                         out_sampling_rate=self.out_size,
-            #                         in_cutoff=self.in_cutoff,
-            #                         out_cutoff=self.out_cutoff,
-            #                         in_half_width=self.in_halfwidth,
-            #                         out_half_width=self.out_halfwidth,
-            #                         filter_size=filter_size,
-            #                         lrelu_upsampling=lrelu_upsampling,
-            #                         is_critically_sampled=self.citically_sampled,
-            #                         use_radial_filters=False)
             raise NotImplementedError
         elif activation == "cno_lrelu_torch":
-            self.activation = LReLu_torch(in_channels=self.out_channels,  # In _channels is not used in these settings
+            self.activation = LReLu_torch(in_channels=self.out_channels,
                                           out_channels=self.out_channels,
                                           in_size=self.in_size,
                                           out_size=self.out_size,
                                           in_sampling_rate=self.in_size,
                                           out_sampling_rate=self.out_size)
         elif activation == "lrelu":
-            self.activation = LReLu_regular(in_channels=self.in_channels,  # In _channels is not used in these settings
+            self.activation = LReLu_regular(in_channels=self.in_channels,
                                             out_channels=self.out_channels,
                                             in_size=self.in_size,
                                             out_size=self.out_size,
@@ -113,22 +94,18 @@ class CNOBlock(nn.Module):
            Returns:
                torch.Tensor: The filtered tensor.
            """
-        # Step 1: FFT
         fft_tensor = torch.fft.fft2(x)
 
-        # Step 2: Create low-pass filter mask
         B, C, M, _ = x.shape
         mask = torch.zeros((M, M), dtype=torch.bool).to(x.device)
-        cutoff = M // K  # Define the cutoff frequency based on the ratio K
-        mask[:cutoff, :cutoff] = 1  # Retain 1/K of the frequency components
+        cutoff = M // K
+        mask[:cutoff, :cutoff] = 1
         mask = mask[None, None, :, :]  # Adjust dimensions to match the tensor (B, C, M, M)
-        mask = mask.expand(B, C, M, M)  # Expand mask to match tensor dimensions
+        mask = mask.expand(B, C, M, M)
 
-        # Step 3: Apply filter
         filtered_fft_tensor = fft_tensor * mask
 
-        # Step 4: Inverse FFT
-        filtered_tensor = torch.fft.ifft2(filtered_fft_tensor).real  # Get the real part after inverse FFT
+        filtered_tensor = torch.fft.ifft2(filtered_fft_tensor).real
 
         return filtered_tensor
 
@@ -149,19 +126,14 @@ class AFNO2D(nn.Module):
         super().__init__()
         assert width % num_blocks == 0, f"hidden_size {width} should be divisble by num_blocks {num_blocks}"
 
-        # self.in_timesteps = in_timesteps
-        # self.out_timesteps = out_timesteps
-        # self.n_channels = n_channels
 
         self.hidden_size = width
         self.sparsity_threshold = sparsity_threshold
         self.num_blocks = num_blocks
         self.block_size = self.hidden_size // self.num_blocks
         self.channel_first = channel_first
-        # self.hard_thresholding_fraction = hard_thresholding_fraction
         self.modes = modes
         self.hidden_size_factor = hidden_size_factor
-        # self.scale = 0.02
         self.scale = 1 / (self.block_size * self.block_size * self.hidden_size_factor)
 
         self.act = ACTIVATION[act]
@@ -178,13 +150,9 @@ class AFNO2D(nn.Module):
             x = x.permute(0, 2, 3, 1)  ### ->N, X, Y, C
         else:
             B, H, W, C = x.shape
-        # x = x.view(*x.shape[:-2], -1)  #### B, X, Y, T*C
-        # grid = self.get_grid(x)
-        # x = torch.cat((x, grid), dim=-1)  #### B, X, Y, T, C
         x_orig = x
 
         x = torch.fft.rfft2(x, dim=(1, 2), norm="ortho")
-        # x = torch.fft.rfft2(x, dim=(1, 2))
 
         x = x.reshape(B, x.shape[1], x.shape[2], self.num_blocks, self.block_size)
 
@@ -193,7 +161,6 @@ class AFNO2D(nn.Module):
         o2_real = torch.zeros(x.shape, device=x.device)
         o2_imag = torch.zeros(x.shape, device=x.device)
 
-        # total_modes = H*W // 2 + 1
         kept_modes = self.modes
 
         o1_real[:, :kept_modes, :kept_modes] = self.act(
@@ -221,36 +188,17 @@ class AFNO2D(nn.Module):
         )
 
         x = torch.stack([o2_real, o2_imag], dim=-1)
-        ## for ab study
-        # x = F.softshrink(x, lambd=self.sparsity_threshold)
 
         x = torch.view_as_complex(x)
         x = x.reshape(B, x.shape[1], x.shape[2], C)
         x = torch.fft.irfft2(x, s=(H, W), dim=(1, 2), norm="ortho")
-        # x = torch.fft.irfft2(x, s=(H, W), dim=(1, 2))
 
-        # x = x.reshape(B, N, C)
-        # x = x.type(dtype)
-
-        # x = x.reshape(*x.shape[: -1], self.out_timesteps, C)
 
         x = x + x_orig
         if self.channel_first:
             x = x.permute(0, 3, 1, 2)     ### N, C, X, Y
 
         return x
-
-    # def get_grid(self, x):
-    #     batchsize, size_x, size_y = x.shape[0], x.shape[1], x.shape[2]
-    #     gridx = torch.tensor(np.linspace(0, 1, size_x), dtype=torch.float)
-    #     gridx = gridx.reshape(1, size_x, 1, 1).repeat([batchsize, 1, size_y, 1])
-    #     gridy = torch.tensor(np.linspace(0, 1, size_y), dtype=torch.float)
-    #     gridy = gridy.reshape(1, 1, size_y, 1).repeat([batchsize, size_x, 1, 1])
-    #     grid = torch.cat((gridx, gridy), dim=-1).to(x.device)
-    #     return grid
-
-
-
 
 
 _logger = logging.getLogger(__name__)
@@ -266,14 +214,11 @@ class Mlp(nn.Module):
         self.fc1 = nn.Linear(in_features, hidden_features)
         self.act = ACTIVATION[act]
         self.fc2 = nn.Linear(hidden_features, out_features)
-        # self.drop = nn.Dropout(drop)
 
     def forward(self, x):
         x = self.fc1(x)
         x = self.act(x)
-        # x = self.drop(x)
         x = self.fc2(x)
-        # x = self.drop(x)
         return x
 
 
@@ -291,12 +236,9 @@ class Block(nn.Module):
                                  hard_thresholding_fraction=1, hidden_size_factor=1, act=act)
 
         self.norm2 = torch.nn.GroupNorm(8, width)
-        # self.norm2 = torch.nn.InstanceNorm2d(width,affine=True,track_running_stats=False)
-
 
 
         mlp_hidden_dim = int(width * mlp_ratio)
-        # self.mlp = Mlp(in_features=width, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
         self.mlp = nn.Sequential(
             nn.Conv2d(in_channels=width, out_channels=mlp_hidden_dim, kernel_size=1, stride=1),
             self.act,
@@ -326,8 +268,6 @@ class Block(nn.Module):
 class CNOPatchEmbed(nn.Module):
     def __init__(self, img_size=224, patch_size=16, in_chans=3, embed_dim=768, out_dim=128,act='cno_lrelu_torch'):
         super().__init__()
-        # img_size = to_2tuple(img_size)
-        # patch_size = to_2tuple(patch_size)
         img_size = (img_size, img_size)
         patch_size = (patch_size, patch_size)
         num_patches = (img_size[1] // patch_size[1]) * (img_size[0] // patch_size[0])
@@ -337,22 +277,18 @@ class CNOPatchEmbed(nn.Module):
         self.out_size = (img_size[0] // patch_size[0], img_size[1] // patch_size[1])
         self.out_dim = out_dim
         self.act = ACTIVATION['gelu']
-        # if act == 'cno_lrelu_torch':
         self.act_patching = LReLu_torch(embed_dim, embed_dim, self.out_size[0],self.out_size[0], self.out_size[0], self.out_size[1])
 
 
         self.proj = nn.Sequential(
-            # CNOBlock(in_chans,embed_dim,self.out_size[0],self.out_size[0],cutoff_den=2.0001,conv_kernel=patch_size[0],activation=act),
             nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size),
             self.act_patching,
-            # self.act,
             nn.Conv2d(embed_dim, out_dim, kernel_size=1, stride=1)
         )
 
     def forward(self, x):
         B, C, H, W = x.shape
         assert H == self.img_size[0] and W == self.img_size[1], f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
-        # x = self.proj(x).flatten(2).transpose(1, 2)
         x = self.proj(x)
         return x
 
@@ -366,9 +302,9 @@ class TimeAggregator(nn.Module):
         self.out_channels = out_channels
         self.type = type
         if self.type == 'mlp':
-            self.w = nn.Parameter(1/(n_timesteps * out_channels**0.5) *torch.randn(n_timesteps, out_channels, out_channels),requires_grad=True)   # initialization could be tuned
+            self.w = nn.Parameter(1/(n_timesteps * out_channels**0.5) *torch.randn(n_timesteps, out_channels, out_channels),requires_grad=True)
         elif self.type == 'exp_mlp':
-            self.w = nn.Parameter(1/(n_timesteps * out_channels**0.5) *torch.randn(n_timesteps, out_channels, out_channels),requires_grad=True)   # initialization could be tuned
+            self.w = nn.Parameter(1/(n_timesteps * out_channels**0.5) *torch.randn(n_timesteps, out_channels, out_channels),requires_grad=True)
             self.gamma = nn.Parameter(2**torch.linspace(-10,10, out_channels).unsqueeze(0),requires_grad=True)  # 1, C
     ##  B, X, Y, T, C
     def forward(self, x):
@@ -416,7 +352,6 @@ class CDPOTNet(nn.Module):
         '''
         super().__init__()
 
-        # self.num_classes = num_classes
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.in_timesteps = in_timesteps
@@ -428,16 +363,13 @@ class CDPOTNet(nn.Module):
         self.mlp_ratio = mlp_ratio
         self.act = ACTIVATION[act]
         patching_act = 'cno_lrelu_torch'
-        # patching_act = 'lrelu'
         self.patch_embed = CNOPatchEmbed(img_size=img_size, patch_size=patch_size, in_chans=in_channels + 3, embed_dim=out_channels * patch_size + 3, out_dim=embed_dim,act=patching_act)
 
         self.img_size = img_size
         self.latent_size = self.patch_embed.out_size
 
 
-        # self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
         self.pos_embed = nn.Parameter(torch.zeros(1, embed_dim, self.patch_embed.out_size[0], self.patch_embed.out_size[1]))
-        # self.pos_drop = nn.Dropout(p=drop_rate)
         self.normalize = normalize
         self.time_agg = time_agg
         self.n_cls = n_cls
@@ -452,7 +384,6 @@ class CDPOTNet(nn.Module):
         else:
             print('using linear droppath with expect rate', drop_path_rate * 0.5)
             dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
-        # dpr = [drop_path_rate for _ in range(depth)]  # stochastic depth decay rule
 
         self.blocks = nn.ModuleList([
             Block(mixing_type=mixing_type,modes=modes,
@@ -473,16 +404,9 @@ class CDPOTNet(nn.Module):
 
         self.time_agg_layer = TimeAggregator(in_channels, in_timesteps, embed_dim, time_agg)
 
-        # self.norm = norm_layer(embed_dim)
-
-        ### attempt load balancing for high resolution
-        # self.act_patching = LReLu_torch(out_layer_dim, out_layer_dim, self.img_size,self.img_size, self.img_size, self.img_size)
 
         self.out_layer = nn.Sequential(
-            # nn.ConvTranspose2d(in_channels=embed_dim, out_channels=out_layer_dim, kernel_size=patch_size, stride=patch_size),
             CNOBlock(embed_dim, out_layer_dim, self.latent_size[0], self.img_size,cutoff_den=2.0001,conv_kernel=1,activation=patching_act),
-            # self.act_patching,
-            # self.act,
             nn.Conv2d(in_channels=out_layer_dim, out_channels=out_layer_dim, kernel_size=1, stride=1),
             self.act,
             nn.Conv2d(in_channels=out_layer_dim, out_channels=self.out_channels * self.out_timesteps,kernel_size=1, stride=1)
@@ -496,15 +420,13 @@ class CDPOTNet(nn.Module):
             self.final_dropout = nn.Identity()
 
         torch.nn.init.trunc_normal_(self.pos_embed, std=.02)
-        # self.apply(self._init_weights)
 
         self.mixing_type = mixing_type
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d):
-            torch.nn.init.trunc_normal_(m.weight, std=.002)    # .02
+            torch.nn.init.trunc_normal_(m.weight, std=.002)
             if m.bias is not None:
-            # if isinstance(m, nn.Linear) and m.bias is not None:
                 nn.init.constant_(m.bias, 0)
         elif isinstance(m, nn.LayerNorm):
             nn.init.constant_(m.bias, 0)
@@ -556,7 +478,6 @@ class CDPOTNet(nn.Module):
 
         x = self.time_agg_layer(x)
 
-        # x = self.pos_drop(x)
         x = rearrange(x, 'b x y c -> b c x y')
 
         if self.normalize:
@@ -565,16 +486,8 @@ class CDPOTNet(nn.Module):
         for blk in self.blocks:
             x = blk(x)
 
-        # if not get_args().checkpoint_activations:
-        #     for blk in self.blocks:
-        #         x = blk(x)
-        # else:
-        #     x = checkpoint_sequential(self.blocks, 4, x)
-
-            # classification
 
         cls_token = x.mean(dim=(2, 3), keepdim=False)
-        # print(cls_token.shape)
         cls_pred = self.cls_head(cls_token)
 
         x = self.out_layer(x).permute(0, 2, 3, 1)
@@ -632,19 +545,15 @@ def checkpoint_filter_fn(state_dict, model):
         state_dict = state_dict['model']
     for k, v in state_dict.items():
         if 'patch_embed.proj.weight' in k and len(v.shape) < 4:
-            # For old models that I trained prior to conv based patchification
             O, I, H, W = model.patch_embed.proj.weight.shape
             v = v.reshape(O, -1, H, W)
         elif k == 'pos_embed' and v.shape != model.pos_embed.shape:
-            # To resize pos embedding when using model at different size from pretrained weights
             v = resize_pos_embed(v, model.pos_embed)
         out_dict[k] = v
     return out_dict
 
 
 if __name__ == "__main__":
-    # x = torch.rand(4, 20, 20, 100)
-    # net = AFNO2D(in_timesteps=3, out_timesteps=1, n_channels=2, width=100, num_blocks=5)
     x = torch.rand(4, 20, 20, 6, 3)
     net = CDPOTNet(img_size=20, patch_size=5, in_channels=3, out_channels=3, in_timesteps=6, out_timesteps=1, embed_dim=32, normalize=True)
     y,_ = net(x)

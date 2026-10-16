@@ -35,7 +35,6 @@ def init_normalizer(type, x1, x2, eps=1e-7):
     return normalizer
 
 ### only available for unit, minmax
-# @timing
 def cal_normalizer_efficient(type, data_list, eps=1e-7):
     with torch.no_grad():
         norm_dims = list(range(data_list[0].ndim -1))
@@ -70,24 +69,16 @@ def cal_normalizer_efficient(type, data_list, eps=1e-7):
 
 class IdentityTransformer():
     def __init__(self, X=None, eps=1e-4):
-        # self.mean = X.mean(dim=0, keepdim=True)
-        # self.std = X.std(dim=0, keepdim=True)
         pass
 
 
     def to(self, device):
-        # self.mean = self.mean.to(device)
-        # self.std = self.std.to(device)
         return self
 
     def cuda(self):
-        # self.mean = self.mean.cuda()
-        # self.std = self.std.cuda()
         return self
 
     def cpu(self):
-        # self.mean = self.mean.cpu()
-        # self.std = self.std.cpu()
         return self
 
     def transform(self, x, inverse=False, component='all'):
@@ -176,14 +167,12 @@ class PointWiseUnitTransformer():
         if component in ['all' , 'all-reduce']:
             if inverse:
                 orig_shape = X.shape
-                # X = X.view(-1, self.mean.shape[0],self.mean.shape[1])   ### align shape for flat tensor
                 return (X*(self.std + self.eps) + self.mean).view(orig_shape)
             else:
                 return (X-self.mean)/(self.std + self.eps)
         else:
             if inverse:
                 orig_shape = X.shape
-                # X = X.view(-1, self.mean.shape[0],self.mean.shape[1])
                 return (X*(self.std[...,component] + self.eps) + self.mean[...,component]).view(orig_shape)
             else:
                 return (X - self.mean[...,component])/(self.std[...,component] + self.eps)
@@ -219,7 +208,6 @@ class Interp1d(torch.autograd.Function):
         out : Pytorch Tensor, same shape as `xnew`
             Tensor for the output. If None: allocated automatically.
         """
-        # making the vectors at least 2D
         is_flat = {}
         require_grad = {}
         v = {}
@@ -238,7 +226,6 @@ class Interp1d(torch.autograd.Function):
         assert len(device) == 1, 'All parameters must be on the same device.'
         device = device[0]
 
-        # Checking for the dimensions
         assert (v['x'].shape[1] == v['y'].shape[1]
                 and (
                      v['x'].shape[0] == v['y'].shape[0]
@@ -260,26 +247,19 @@ class Interp1d(torch.autograd.Function):
             v['xnew'] = v['xnew'].contiguous().view(1, -1)
             reshaped_xnew = True
 
-        # identify the dimensions of output and check if the one provided is ok
         D = max(v['x'].shape[0], v['xnew'].shape[0])
         shape_ynew = (D, v['xnew'].shape[-1])
         if out is not None:
             if out.numel() != shape_ynew[0]*shape_ynew[1]:
-                # The output provided is of incorrect shape.
-                # Going for a new one
                 out = None
             else:
                 ynew = out.reshape(shape_ynew)
         if out is None:
             ynew = torch.zeros(*shape_ynew, device=device)
 
-        # moving everything to the desired device in case it was not there
-        # already (not handling the case things do not fit entirely, user will
-        # do it if required.)
         for name in v:
             v[name] = v[name].to(device)
 
-        # calling searchsorted on the x values.
         ind = ynew.long()
 
         # expanding xnew to match the number of rows of x in case only one xnew is
@@ -299,13 +279,11 @@ class Interp1d(torch.autograd.Function):
         # -1, i.e. number of columns in x -2
         ind = torch.clamp(ind, 0, v['x'].shape[1] - 1 - 1)
 
-        # helper function to select stuff according to the found indices.
         def sel(name):
             if is_flat[name]:
                 return v[name].contiguous().view(-1)[ind]
             return torch.gather(v[name], 1, ind)
 
-        # activating gradient storing for everything now
         enable_grad = False
         saved_inputs = []
         for name in ['x', 'y', 'xnew']:
@@ -317,8 +295,6 @@ class Interp1d(torch.autograd.Function):
         # assuming x are sorted in the dimension 1, computing the slopes for
         # the segments
         is_flat['slopes'] = is_flat['x']
-        # now we have found the indices of the neighbors, we start building the
-        # output. Hence, we start also activating gradient tracking
         with torch.enable_grad() if enable_grad else contextlib.suppress():
             v['slopes'] = (
                     (v['y'][:, 1:]-v['y'][:, :-1])
@@ -326,7 +302,6 @@ class Interp1d(torch.autograd.Function):
                     (eps + (v['x'][:, 1:]-v['x'][:, :-1]))
                 )
 
-            # now build the linear interpolation
             ynew = sel('y') + sel('slopes')*(
                                     v['xnew'] - sel('x'))
 
@@ -353,7 +328,6 @@ class Interp1d(torch.autograd.Function):
 
 
 
-### TODO: verify errors
 class TorchQuantileTransformer():
     '''
     QuantileTransformer implemented by PyTorch
@@ -405,7 +379,6 @@ class TorchQuantileTransformer():
                     X_col = self.norm_cdf(X_col)
                 # else output distribution is already a uniform distribution
 
-        # find index for lower and higher bounds
         with np.errstate(invalid="ignore"):  # hide NaN comparison warnings
             if output_distribution == "normal":
                 lower_bounds_idx = X_col - BOUNDS_THRESHOLD < lower_bound_x
@@ -453,7 +426,6 @@ class TorchQuantileTransformer():
         X_ = X.reshape(-1, X.shape[-1])
         X_out_ = torch.zeros_like(X_)
         for feature_idx in range(X_.shape[1]):
-            # X_out[:, feature_idx] = self.transform_col(X[:, feature_idx], self.quantiles_[:, feature_idx], inverse)
             X_out_[:, feature_idx] = self.transform_col(X_[:, feature_idx], self.quantiles_[:, feature_idx], inverse)
         return X_out_.reshape(X.shape)
 

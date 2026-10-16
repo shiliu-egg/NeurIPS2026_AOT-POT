@@ -19,11 +19,6 @@ from einops.layers.torch import Rearrange
 ACTIVATION = {'gelu':nn.GELU(),'tanh':nn.Tanh(),'sigmoid':nn.Sigmoid(),'relu':nn.ReLU(),'leaky_relu':nn.LeakyReLU(0.1),'softplus':nn.Softplus(),'ELU':nn.ELU(),'silu':nn.SiLU()}
 
 
-################################################################################
-# ComplexGroupNorm: Normalize real and imaginary parts separately
-# Used in AFNO2D between the two frequency-domain MLP layers
-################################################################################
-
 class ComplexGroupNorm(nn.Module):
     """
     GroupNorm for complex-valued tensors in frequency domain.
@@ -50,7 +45,6 @@ class ComplexGroupNorm(nn.Module):
         x_real = x_real.permute(0, 3, 4, 1, 2).reshape(B, num_blocks * block_size, H, W)
         x_imag = x_imag.permute(0, 3, 4, 1, 2).reshape(B, num_blocks * block_size, H, W)
 
-        # Apply GroupNorm
         x_real = self.norm_real(x_real)
         x_imag = self.norm_imag(x_imag)
 
@@ -61,10 +55,7 @@ class ComplexGroupNorm(nn.Module):
         return x_real, x_imag
 
 
-################################################################################
-# mHC (Manifold-Constrained Hyper-Connections) Components
 # Based on: "mHC: Manifold-Constrained Hyper-Connections" by DeepSeek-AI
-################################################################################
 
 class SinkhornKnopp(nn.Module):
     """
@@ -97,10 +88,8 @@ class SinkhornKnopp(nn.Module):
         # Clamp to prevent exp overflow (exp(30) ≈ 1e13, exp(-30) ≈ 1e-13)
         x = torch.clamp(x, min=-30.0, max=30.0)
 
-        # Exponentiate to ensure non-negativity
         M = torch.exp(x)
 
-        # Alternating row and column normalization
         for _ in range(self.num_iter):
             # Row normalization: each row sums to 1
             M = M / (M.sum(dim=-1, keepdim=True) + self.epsilon)
@@ -133,20 +122,16 @@ class MHCMapping(nn.Module):
         super().__init__()
         self.n_streams = n_streams
         self.hidden_dim = hidden_dim
-        total_dim = n_streams * hidden_dim  # nC
+        total_dim = n_streams * hidden_dim
 
-        # RMSNorm for the flattened nC-dimensional vector
         # Using LayerNorm without affine as a simple RMSNorm approximation
-        # The paper absorbs RMSNorm weights into φ
         self.rms_norm = nn.LayerNorm(total_dim, elementwise_affine=False)
 
-        # Dynamic mapping linear projections φ
         # φ^pre, φ^post ∈ R^{nC × n}, φ^res ∈ R^{nC × n²}
         self.phi_pre = nn.Linear(total_dim, n_streams, bias=False)
         self.phi_post = nn.Linear(total_dim, n_streams, bias=False)
         self.phi_res = nn.Linear(total_dim, n_streams * n_streams, bias=False)
 
-        # Static biases b
         self.b_pre = nn.Parameter(torch.zeros(n_streams))
         self.b_post = nn.Parameter(torch.zeros(n_streams))
         self.b_res = nn.Parameter(torch.zeros(n_streams, n_streams))
@@ -156,7 +141,6 @@ class MHCMapping(nn.Module):
         self.alpha_post = nn.Parameter(torch.tensor(alpha_init))
         self.alpha_res = nn.Parameter(torch.tensor(alpha_init))
 
-        # Sinkhorn projector for H^res
         self.sinkhorn = SinkhornKnopp(num_iter=sinkhorn_iter)
 
         # Initialize φ with small values (combined with small α ensures stability at init)
@@ -164,8 +148,6 @@ class MHCMapping(nn.Module):
         nn.init.normal_(self.phi_post.weight, std=0.02)
         nn.init.normal_(self.phi_res.weight, std=0.02)
 
-        # Initialize b_res to identity matrix (so initial H^res ≈ identity after Sinkhorn)
-        # This ensures the residual connection initially behaves like standard residual
         with torch.no_grad():
             self.b_res.copy_(torch.eye(n_streams))
 
@@ -181,21 +163,17 @@ class MHCMapping(nn.Module):
         """
         B, n, C, H, W = x_stream.shape
 
-        # Step 1: Spatial pooling + Flatten
         # (B, n, C, H, W) → (B, n, C) → (B, nC)
-        x_pooled = x_stream.mean(dim=(-2, -1))  # Global average pooling over spatial dims
+        x_pooled = x_stream.mean(dim=(-2, -1))
         x_flat = x_pooled.reshape(B, -1)  # (B, nC)
 
-        # Step 2: RMSNorm
         x_norm = self.rms_norm(x_flat)  # (B, nC)
 
-        # Step 3: Compute dynamic mappings + static biases
         # H̃ = α · (x' · φ) + b
         H_tilde_pre = self.alpha_pre * self.phi_pre(x_norm) + self.b_pre      # (B, n)
         H_tilde_post = self.alpha_post * self.phi_post(x_norm) + self.b_post  # (B, n)
         H_tilde_res = self.alpha_res * self.phi_res(x_norm).view(B, n, n) + self.b_res  # (B, n, n)
 
-        # Step 4: Constraint projections
         H_pre = torch.sigmoid(H_tilde_pre)        # (B, n), non-negative via sigmoid
         H_post = 2 * torch.sigmoid(H_tilde_post)  # (B, n), range [0, 2] as per paper
         H_res = self.sinkhorn(H_tilde_res)        # (B, n, n), doubly stochastic
@@ -246,7 +224,6 @@ class MHCBlock(nn.Module):
         self.sandwich_norm = sandwich_norm
         self.use_layer_scale = use_layer_scale
 
-        # Original components (unchanged)
         self.norm1 = nn.GroupNorm(8, width)
         if mixing_type == "afno":
             self.filter = AFNO2D(width=width, num_blocks=n_blocks, sparsity_threshold=0.01,
@@ -256,13 +233,11 @@ class MHCBlock(nn.Module):
 
         self.norm2 = nn.GroupNorm(8, width)
 
-        # Sandwich-Norm: additional post-normalization layers
         if sandwich_norm:
             self.norm1_post = nn.GroupNorm(8, width)
             self.norm2_post = nn.GroupNorm(8, width)
 
         # Layer Scale: learnable scaling factors for residual branches (from CaiT paper)
-        # Initialized to small values (0.1) to let network start close to identity
         if use_layer_scale:
             self.gamma1 = nn.Parameter(torch.ones(width) * 0.01)
             self.gamma2 = nn.Parameter(torch.ones(width) * 0.01)
@@ -274,10 +249,8 @@ class MHCBlock(nn.Module):
             nn.Conv2d(in_channels=mlp_hidden_dim, out_channels=width, kernel_size=1, stride=1),
         )
 
-        # MHC mappings for AFNO sub-layer
         self.mhc_afno = MHCMapping(n_streams, width, sinkhorn_iter, alpha_init)
 
-        # MHC mappings for MLP sub-layer
         self.mhc_mlp = MHCMapping(n_streams, width, sinkhorn_iter, alpha_init)
 
     def forward(self, x_stream):
@@ -290,61 +263,45 @@ class MHCBlock(nn.Module):
         """
         B, n, C, H, W = x_stream.shape
 
-        # ========== AFNO Sub-layer ==========
-        # 1. Compute mapping matrices
         H_pre, H_post, H_res = self.mhc_afno(x_stream)
 
-        # 2. Aggregate: H^pre · x → (B, C, H, W)
         # Normalize H_pre so it sums to 1 (proper weighted average)
         H_pre_norm = H_pre / (H_pre.sum(dim=-1, keepdim=True) + 1e-8)  # (B, n)
         sub_in = torch.einsum('bn, bnchw -> bchw', H_pre_norm, x_stream)  # (B, C, H, W)
 
-        # 3. Sub-layer processing (Norm → AFNO2D → optional post-Norm)
         sub_in = self.norm1(sub_in)
         sub_out = self.filter(sub_in)  # AFNO2D has internal residual
         if self.sandwich_norm:
             sub_out = self.norm1_post(sub_out)
 
-        # Apply Layer Scale if enabled
         if self.use_layer_scale:
             sub_out = self.gamma1.view(1, -1, 1, 1) * sub_out
 
-        # 4. Distribute: (H^post)^T · sub_out → (B, n, C, H, W)
         # H_post: (B, n), sub_out: (B, C, H, W)
         sub_out_expand = H_post.view(B, n, 1, 1, 1) * sub_out.unsqueeze(1)  # (B, n, C, H, W)
 
-        # 5. Residual mixing: H^res · x_stream
         # H_res: (B, n, n), x_stream: (B, n, C, H, W)
         x_mixed = torch.einsum('bmn, bnchw -> bmchw', H_res, x_stream)  # (B, n, C, H, W)
 
-        # 6. Update: x_stream = H^res · x_stream + H^post^T · sub_out
         x_stream = x_mixed + sub_out_expand
 
-        # ========== MLP Sub-layer ==========
-        # 1. Compute mapping matrices
         H_pre, H_post, H_res = self.mhc_mlp(x_stream)
 
-        # 2. Aggregate
         H_pre_norm = H_pre / (H_pre.sum(dim=-1, keepdim=True) + 1e-8)
         sub_in = torch.einsum('bn, bnchw -> bchw', H_pre_norm, x_stream)
 
-        # 3. Sub-layer processing (Norm → MLP → optional post-Norm)
         sub_in = self.norm2(sub_in)
         sub_out = self.mlp(sub_in)
         if self.sandwich_norm:
             sub_out = self.norm2_post(sub_out)
 
-        # Apply Layer Scale if enabled
         if self.use_layer_scale:
             sub_out = self.gamma2.view(1, -1, 1, 1) * sub_out
 
-        # 4. Distribute
         sub_out_expand = H_post.view(B, n, 1, 1, 1) * sub_out.unsqueeze(1)
 
-        # 5. Residual mixing
         x_mixed = torch.einsum('bmn, bnchw -> bmchw', H_res, x_stream)
 
-        # 6. Update
         x_stream = x_mixed + sub_out_expand
 
         return x_stream
@@ -371,7 +328,6 @@ class AFNO2D(nn.Module):
         self.hidden_size_factor = hidden_size_factor
         self.complex_norm = complex_norm
         self.use_far = use_far
-        # self.scale = 0.02
         self.scale = 1 / (self.block_size * self.block_size * self.hidden_size_factor)
 
         self.act = ACTIVATION[act]
@@ -381,16 +337,12 @@ class AFNO2D(nn.Module):
         self.w2 = nn.Parameter(self.scale * torch.rand(2, self.num_blocks, self.block_size * self.hidden_size_factor, self.block_size))
         self.b2 = nn.Parameter(self.scale * torch.rand(2, self.num_blocks, self.block_size))
 
-        # ComplexGroupNorm between the two MLP layers in frequency domain
         if self.complex_norm:
             # o1 has shape (..., num_blocks, block_size * hidden_size_factor)
             hidden_dim = self.num_blocks * self.block_size * self.hidden_size_factor
-            num_groups = min(8, hidden_dim)  # Use 8 groups or less if hidden_dim is small
+            num_groups = min(8, hidden_dim)
             self.freq_norm = ComplexGroupNorm(num_groups, hidden_dim)
 
-        # Frequency-Aware Residual: learnable weights for different frequency modes
-        # Low frequency gets higher weight (preserve large-scale structure)
-        # High frequency gets lower weight (allow more processing/modification)
         if self.use_far:
             self.far_weight = nn.Parameter(self._init_far_weights(modes))
 
@@ -405,14 +357,12 @@ class AFNO2D(nn.Module):
         """
         y, x = torch.meshgrid(torch.arange(modes), torch.arange(modes), indexing='ij')
         radius = torch.sqrt(x.float()**2 + y.float()**2)
-        # Normalize radius to [0, 1]
         max_radius = radius.max()
         if max_radius > 0:
             radius_norm = radius / max_radius
         else:
             radius_norm = radius
         # Weight: 1.0 at center (low freq), 0.5 at corner (high freq)
-        # This means low frequency residual is stronger, high frequency is weaker
         weights = 1.0 - 0.5 * radius_norm
         return weights
 
@@ -426,7 +376,6 @@ class AFNO2D(nn.Module):
         x_orig = x
 
         x = torch.fft.rfft2(x, dim=(1, 2), norm="ortho")
-        # x = torch.fft.rfft2(x, dim=(1, 2))
 
         x = x.reshape(B, x.shape[1], x.shape[2], self.num_blocks, self.block_size)
 
@@ -435,7 +384,6 @@ class AFNO2D(nn.Module):
         o2_real = torch.zeros(x.shape, device=x.device)
         o2_imag = torch.zeros(x.shape, device=x.device)
 
-        # total_modes = H*W // 2 + 1
         kept_modes = self.modes
 
         o1_real[:, :kept_modes, :kept_modes] = self.act(
@@ -450,7 +398,6 @@ class AFNO2D(nn.Module):
             self.b1[1]
         )
 
-        # Apply ComplexGroupNorm between the two MLP layers if enabled
         if self.complex_norm:
             o1_real, o1_imag = self.freq_norm(o1_real, o1_imag)
 
@@ -466,8 +413,6 @@ class AFNO2D(nn.Module):
             self.b2[1]
         )
 
-        # Apply Frequency-Aware Residual (FAR) weights if enabled
-        # This scales frequency components: low freq preserved more, high freq modified more
         if self.use_far:
             # far_weight shape: (modes, modes), need to broadcast to (B, modes, modes, num_blocks, block_size)
             far_w = self.far_weight.view(1, kept_modes, kept_modes, 1, 1)
@@ -475,8 +420,6 @@ class AFNO2D(nn.Module):
             o2_imag[:, :kept_modes, :kept_modes] = o2_imag[:, :kept_modes, :kept_modes] * far_w
 
         x = torch.stack([o2_real, o2_imag], dim=-1)
-        ## for ab study
-        # x = F.softshrink(x, lambd=self.sparsity_threshold)
 
         x = torch.view_as_complex(x)
         x = x.reshape(B, x.shape[1], x.shape[2], C)
@@ -506,7 +449,6 @@ class Mlp(nn.Module):
         self.fc1 = nn.Linear(in_features, hidden_features)
         self.act = ACTIVATION[act]
         self.fc2 = nn.Linear(hidden_features, out_features)
-        # self.drop = nn.Dropout(drop)
 
     def forward(self, x):
         x = self.fc1(x)
@@ -518,10 +460,7 @@ class Mlp(nn.Module):
 class Block(nn.Module):
     def __init__(self, mixing_type = 'afno', double_skip = True, width = 32, n_blocks = 4, mlp_ratio=1., channel_first = True, modes = 32, drop=0., drop_path=0., act='gelu', h=14, w=8, complex_norm=False, sandwich_norm=False, use_layer_scale=False, use_far=False):
         super().__init__()
-        # self.norm1 = norm_layer(width)
-        # self.norm1 = torch.nn.LayerNorm([width])
         self.norm1 = torch.nn.GroupNorm(8, width)
-        # self.norm1 = torch.nn.InstanceNorm2d(width,affine=True,track_running_stats=False)
         self.width = width
         self.modes = modes
         self.act = ACTIVATION[act]
@@ -534,13 +473,11 @@ class Block(nn.Module):
 
         self.norm2 = torch.nn.GroupNorm(8, width)
 
-        # Sandwich-Norm: additional post-normalization layers
         if sandwich_norm:
             self.norm1_post = torch.nn.GroupNorm(8, width)
             self.norm2_post = torch.nn.GroupNorm(8, width)
 
         # Layer Scale: learnable scaling factors for residual branches (from CaiT paper)
-        # Initialized to small values (0.1) to let network start close to identity
         if use_layer_scale:
             self.gamma1 = nn.Parameter(torch.ones(width) * 0.01)
             self.gamma2 = nn.Parameter(torch.ones(width) * 0.01)
@@ -561,7 +498,6 @@ class Block(nn.Module):
         if self.sandwich_norm:
             x = self.norm1_post(x)
 
-        # Apply Layer Scale if enabled
         if self.use_layer_scale:
             x = self.gamma1.view(1, -1, 1, 1) * x
 
@@ -574,7 +510,6 @@ class Block(nn.Module):
         if self.sandwich_norm:
             x = self.norm2_post(x)
 
-        # Apply Layer Scale if enabled
         if self.use_layer_scale:
             x = self.gamma2.view(1, -1, 1, 1) * x
 
@@ -586,8 +521,6 @@ class Block(nn.Module):
 class PatchEmbed(nn.Module):
     def __init__(self, img_size=224, patch_size=16, in_chans=3, embed_dim=768, out_dim=128,act='gelu'):
         super().__init__()
-        # img_size = to_2tuple(img_size)
-        # patch_size = to_2tuple(patch_size)
         img_size = (img_size, img_size)
         patch_size = (patch_size, patch_size)
         num_patches = (img_size[1] // patch_size[1]) * (img_size[0] // patch_size[0])
@@ -607,7 +540,6 @@ class PatchEmbed(nn.Module):
     def forward(self, x):
         B, C, H, W = x.shape
         assert H == self.img_size[0] and W == self.img_size[1], f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
-        # x = self.proj(x).flatten(2).transpose(1, 2)
         x = self.proj(x)
         return x
 
@@ -621,9 +553,9 @@ class TimeAggregator(nn.Module):
         self.out_channels = out_channels
         self.type = type
         if self.type == 'mlp':
-            self.w = nn.Parameter(1/(n_timesteps * out_channels**0.5) *torch.randn(n_timesteps, out_channels, out_channels),requires_grad=True)   # initialization could be tuned
+            self.w = nn.Parameter(1/(n_timesteps * out_channels**0.5) *torch.randn(n_timesteps, out_channels, out_channels),requires_grad=True)
         elif self.type == 'exp_mlp':
-            self.w = nn.Parameter(1/(n_timesteps * out_channels**0.5) *torch.randn(n_timesteps, out_channels, out_channels),requires_grad=True)   # initialization could be tuned
+            self.w = nn.Parameter(1/(n_timesteps * out_channels**0.5) *torch.randn(n_timesteps, out_channels, out_channels),requires_grad=True)
             self.gamma = nn.Parameter(2**torch.linspace(-10,10, out_channels).unsqueeze(0),requires_grad=True)  # 1, C
     ##  B, X, Y, T, C
     def forward(self, x):
@@ -653,7 +585,6 @@ class PointwiseTransform(nn.Module):
     def __init__(self, dim, hidden_dim=None, act='gelu'):
         super().__init__()
         self.linear = nn.Linear(dim, dim)
-        # Initialize as identity mapping
         nn.init.eye_(self.linear.weight)
         nn.init.zeros_(self.linear.bias)
 
@@ -714,14 +645,12 @@ class DPOTNet(nn.Module):
         self.time_agg = time_agg
         self.n_cls = n_cls
 
-        # mHC parameters
         self.use_mhc = use_mhc
         self.n_streams = n_streams
 
         h = img_size // patch_size
         w = h // 2 + 1
 
-        # Choose block type based on use_mhc
         if use_mhc:
             self.blocks = nn.ModuleList([
                 MHCBlock(mixing_type=mixing_type, modes=modes,
@@ -759,7 +688,6 @@ class DPOTNet(nn.Module):
         self.time_agg_layer = TimeAggregator(in_channels, in_timesteps, embed_dim, time_agg)
 
 
-        ### attempt load balancing for high resolution
         self.out_layer = nn.Sequential(
             nn.ConvTranspose2d(in_channels=embed_dim, out_channels=out_layer_dim, kernel_size=patch_size, stride=patch_size),
             self.act,
@@ -773,7 +701,6 @@ class DPOTNet(nn.Module):
         torch.nn.init.trunc_normal_(self.pos_embed, std=.02)
         self.mixing_type = mixing_type
 
-        # Pointwise MLP transform at input/output
         self.add_mlp = add_mlp
         if add_mlp:
             self.input_mlp = PointwiseTransform(in_channels, mlp_hidden, act=act)
@@ -782,9 +709,8 @@ class DPOTNet(nn.Module):
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d):
-            torch.nn.init.trunc_normal_(m.weight, std=.002)    # .02
+            torch.nn.init.trunc_normal_(m.weight, std=.002)
             if m.bias is not None:
-            # if isinstance(m, nn.Linear) and m.bias is not None:
                 nn.init.constant_(m.bias, 0)
         elif isinstance(m, nn.LayerNorm):
             nn.init.constant_(m.bias, 0)
@@ -818,9 +744,8 @@ class DPOTNet(nn.Module):
     def forward(self, x):
         B, _, _, T, _ = x.shape
 
-        # Pointwise input transform
         if self.add_mlp:
-            x = self.input_mlp(x)  # (B, X, Y, T, C) -> (B, X, Y, T, C)
+            x = self.input_mlp(x)
 
         if self.normalize:
             mu, sigma = x.mean(dim=(1,2,3),keepdim=True), x.std(dim=(1,2,3),keepdim=True) + 1e-6    # B,1,1,1,C
@@ -845,23 +770,17 @@ class DPOTNet(nn.Module):
         if self.normalize:
             x = scale_sigma * x + scale_mu   ### Ada_in layer
 
-        # Process through blocks (with or without mHC)
         if self.use_mhc:
-            # ===== mHC: Initialize multi-stream =====
             # (B, C, H, W) → (B, n, C, H, W)
-            # Use expand + contiguous to create n copies of the feature
             x_stream = x.unsqueeze(1).expand(-1, self.n_streams, -1, -1, -1).contiguous()
 
-            # ===== Process through MHC blocks =====
             for blk in self.blocks:
                 x_stream = blk(x_stream)
 
-            # ===== mHC: Final aggregation =====
             # (B, n, C, H, W) → (B, C, H, W)
             w_final = torch.softmax(self.final_agg, dim=0)  # (n,)
             x = torch.einsum('n, bnchw -> bchw', w_final, x_stream)
         else:
-            # Standard processing without mHC
             for blk in self.blocks:
                 x = blk(x)
 
@@ -876,9 +795,8 @@ class DPOTNet(nn.Module):
         if self.normalize:
             x = x * sigma  + mu
 
-        # Pointwise output transform
         if self.add_mlp:
-            x = self.output_mlp(x)  # (B, X, Y, T_out, C_out) -> (B, X, Y, T_out, C_out)
+            x = self.output_mlp(x)
 
         return x, cls_pred
 
@@ -929,19 +847,15 @@ def checkpoint_filter_fn(state_dict, model):
         state_dict = state_dict['model']
     for k, v in state_dict.items():
         if 'patch_embed.proj.weight' in k and len(v.shape) < 4:
-            # For old models that I trained prior to conv based patchification
             O, I, H, W = model.patch_embed.proj.weight.shape
             v = v.reshape(O, -1, H, W)
         elif k == 'pos_embed' and v.shape != model.pos_embed.shape:
-            # To resize pos embedding when using model at different size from pretrained weights
             v = resize_pos_embed(v, model.pos_embed)
         out_dict[k] = v
     return out_dict
 
 
 if __name__ == "__main__":
-    # x = torch.rand(4, 20, 20, 100)
-    # net = AFNO2D(in_timesteps=3, out_timesteps=1, n_channels=2, width=100, num_blocks=5)
     x = torch.rand(4, 20, 20, 6, 3)
     net = DPOTNet(img_size=20, patch_size=5, in_channels=3, out_channels=3, in_timesteps=6, out_timesteps=1, embed_dim=32,normalize=True)
     y,_ = net(x)

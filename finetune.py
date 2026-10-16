@@ -30,19 +30,8 @@ from models.fno import FNO2d
 from models.dpot import DPOTNet
 import pickle
 
-# torch.manual_seed(0)
-# np.random.seed(0)
-
-
-
-################################################################
-# configs
-################################################################
-
-
 parser = argparse.ArgumentParser(description='Training or pretraining for the same data type')
 
-### currently no influence
 parser.add_argument('--model', type=str, default='DPOT')
 parser.add_argument('--dataset',type=str, default='ns2d')
 
@@ -55,23 +44,22 @@ parser.add_argument('--use_writer', action='store_true',default=False)
 
 parser.add_argument('--res', type=int, default=64)
 parser.add_argument('--noise_scale',type=float, default=0.0)
-# parser.add_argument('--n_channels',type=int,default=-1)
 
-### shared params
+# Shared model parameters
 parser.add_argument('--width', type=int, default=20)
 parser.add_argument('--n_layers',type=int, default=4)
 parser.add_argument('--act',type=str, default='gelu')
 
-### GNOT params
+# GNOT parameters
 parser.add_argument('--max_nodes',type=int, default=-1)
 
-### FNO params
+# FNO parameters
 parser.add_argument('--modes', type=int, default=12)
 parser.add_argument('--use_ln',type=int, default=0)
 parser.add_argument('--normalize',type=int, default=0)
 
 
-### AFNO
+# AFNO parameters
 parser.add_argument('--patch_size',type=int, default=1)
 parser.add_argument('--n_blocks',type=int, default=8)
 parser.add_argument('--mlp_ratio',type=int, default=1)
@@ -97,18 +85,18 @@ parser.add_argument('--comment',type=str, default="")
 parser.add_argument('--log_path',type=str,default='')
 
 
-### finetuning parameters
+# Fine-tuning parameters
 parser.add_argument('--n_channels',type=int, default=4)
 parser.add_argument('--n_class',type=int,default=12)
 parser.add_argument('--load_components',nargs='+', type=str, default=['blocks','pos','time_agg'])
 
-### Pointwise MLP transform parameters
+# Pointwise MLP transform parameters
 parser.add_argument('--add_mlp',type=int, default=0)
 parser.add_argument('--mlp_hidden',type=int, default=16)
 parser.add_argument('--freeze_mlp',type=int, default=0)
 parser.add_argument('--load_mlp_path',type=str, default='')
 
-### mHC parameters (must match pretrained model)
+# mHC parameters (must match pretrained model)
 parser.add_argument('--use_mhc',type=int, default=0)
 parser.add_argument('--n_streams',type=int, default=4)
 parser.add_argument('--sinkhorn_iter',type=int, default=20)
@@ -129,9 +117,6 @@ print(f"Current working directory: {os.getcwd()}")
 
 
 
-################################################################
-# load data and dataloader
-################################################################
 train_paths = args.train_paths
 test_paths = args.test_paths
 args.data_weights = [1] * len(args.train_paths) if len(args.data_weights) == 1 else args.data_weights
@@ -144,9 +129,6 @@ train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_
 test_loaders = [torch.utils.data.DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False,num_workers=12) for test_dataset in test_datasets]
 ntrain, ntests = len(train_dataset), [len(test_dataset) for test_dataset in test_datasets]
 print('Train num {} test num {}'.format(train_dataset.n_sizes, ntests))
-################################################################
-# load model
-################################################################
 if args.model == "FNO":
     model = FNO2d(args.modes, args.modes, args.width, img_size = args.res, patch_size=args.patch_size, in_timesteps = args.T_in, out_timesteps=1,normalize=args.normalize,n_layers = args.n_layers,use_ln = args.use_ln, n_channels=train_dataset.n_channels, n_cls=len(args.train_paths)).to(device)
 elif args.model == 'DPOT':
@@ -158,7 +140,7 @@ if args.resume_path:
     print('Loading models and fine tune from {}'.format(args.resume_path))
     load_components_from_pretrained(model, torch.load(args.resume_path,map_location='cuda:{}'.format(args.gpu))['model'], components=args.load_components)
 
-### Load pretrained MLP transform weights from a separate checkpoint
+# Load pretrained MLP transform weights from a separate checkpoint.
 if args.load_mlp_path and args.load_mlp_path != 'none':
     print('Loading MLP transform weights from {}'.format(args.load_mlp_path))
     mlp_ckpt = torch.load(args.load_mlp_path, map_location='cuda:{}'.format(args.gpu))['model']
@@ -166,14 +148,12 @@ if args.load_mlp_path and args.load_mlp_path != 'none':
     model.load_state_dict(mlp_state, strict=False)
     print('Loaded MLP keys: {}'.format(list(mlp_state.keys())))
 
-### Freeze MLP transform parameters
 if args.freeze_mlp and args.add_mlp:
     print('Freezing MLP transform parameters')
     for name, param in model.named_parameters():
         if name.startswith('input_mlp.') or name.startswith('output_mlp.'):
             param.requires_grad = False
 
-#### set optimizer
 if args.opt == 'lamb':
     optimizer = Lamb(model.parameters(), lr=args.lr, betas = (args.beta1, args.beta2), adam=True, debias=False,weight_decay=1e-4)
 else:
@@ -216,9 +196,6 @@ else:
 print(model)
 count_parameters(model)
 
-################################################################
-# Main function for pretraining
-################################################################
 myloss = SimpleLpLoss(size_average=False)
 clsloss = torch.nn.CrossEntropyLoss(reduction='sum')
 iter = 0
@@ -243,16 +220,14 @@ for ep in range(args.epochs):
         cls = cls.to(device)
 
 
-        ## auto-regressive training loop, support 1. noise injection, 2. long rollout backward, 3. temporal bundling prediction
+        # Autoregressive rollout with temporal bundling.
         for t in range(0, yy.shape[-2], args.T_bundle):
             y = yy[..., t:t + args.T_bundle, :]
 
-            ### auto-regressive training
             xx = xx + args.noise_scale *torch.sum(xx**2, dim=(1,2,3),keepdim=True)**0.5 * torch.randn_like(xx)
             im, cls_pred = model(xx)
             loss += myloss(im, y, mask=msk)
 
-            ### classification
             pred_labels = torch.argmax(cls_pred,dim=1)
             cls_loss += clsloss(cls_pred, cls.squeeze())
             cls_correct += (pred_labels == cls.squeeze()).sum().item()
@@ -269,7 +244,7 @@ for ep in range(args.epochs):
         train_l2_full += l2_full.item()
 
         optimizer.zero_grad()
-        total_loss = loss  # + 1.0 * cls_loss
+        total_loss = loss
         total_loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
         optimizer.step()
@@ -282,8 +257,7 @@ for ep in range(args.epochs):
             writer.add_scalar("train_loss_step", loss.item()/(xx.shape[0] * yy.shape[-2] / args.T_bundle), iter)
             writer.add_scalar("train_loss_full", l2_full / xx.shape[0], iter)
 
-            ## reset model
-            if loss.item() > 10 * loss_previous : # or (ep > 50 and l2_full / xx.shape[0] > 0.9):
+            if loss.item() > 10 * loss_previous :
                 print('loss explodes, loading model from previous epoch')
                 checkpoint = torch.load(model_path,map_location='cuda:{}'.format(args.gpu))
                 model.load_state_dict(checkpoint['model'])
@@ -336,7 +310,6 @@ for ep in range(args.epochs):
     t2 = t_1 = default_timer()
     lr = optimizer.param_groups[0]['lr']
     print('epoch {}, time {:.5f}, lr {:.2e}, train l2 step {:.5f} train l2 full {:.5f}, test l2 step {} test l2 full {}, cls acc {:.5f}, time train avg {:.5f} load avg {:.5f} test {:.5f}'.format(ep, t2 - t1, lr,train_l2_step_avg, train_l2_full_avg,', '.join(['{:.5f}'.format(val) for val in test_l2_steps]),', '.join(['{:.5f}'.format(val) for val in test_l2_fulls]), cls_acc, t_train / len(train_loader), t_load / len(train_loader), t_test))
-
 
 
 

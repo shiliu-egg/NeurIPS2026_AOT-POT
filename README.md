@@ -28,15 +28,15 @@ AOT-POT learns adaptive, input-dependent transformations that make diverse PDE s
 
 ## 🛠️ Installation
 
-The reference environment uses **Python 3.9.25**, **PyTorch 2.4.0**, and the **CUDA 12.4** PyTorch runtime on Linux. Use NVIDIA GPUs with a driver compatible with CUDA 12.4. Create the `dpot` Conda environment and install the training dependencies:
+The reference environment uses **Python 3.9.25**, **PyTorch 2.4.0**, and the **CUDA 12.4** PyTorch runtime on Linux. Use NVIDIA GPUs with a driver compatible with CUDA 12.4. Create the `aotpot` Conda environment and install the training dependencies:
 
 ```bash
-conda create -n dpot python=3.9.25 pip -y
-conda activate dpot
+conda create -n aotpot python=3.9.25 pip -y
+conda activate aotpot
 python -m pip install -r requirements.txt
 ```
 
-[requirements.txt](requirements.txt) pins the training dependencies to the versions in the reference `dpot` environment, including the CUDA 12.4 build of PyTorch. Run the installation and training commands from the repository root with `dpot` activated.
+[requirements.txt](requirements.txt) pins the training dependencies to the versions in the reference `aotpot` environment, including the CUDA 12.4 build of PyTorch. Run the installation and training commands from the repository root with `aotpot` activated.
 
 ## 📚 Datasets
 
