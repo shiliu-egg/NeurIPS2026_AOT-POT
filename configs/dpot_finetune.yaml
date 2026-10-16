@@ -1,0 +1,130 @@
+name: NS2d
+file: finetune.py
+device: '0,1,2,3,4,5,6,7'        # Eligible GPUs; each fine-tuning task uses one GPU
+model: DPOT
+dataset: ns2d
+use_writer: True
+res: 128
+modes: 32
+patch_size: 8
+lr: 0.001
+lr_method: cycle
+warmup_epochs: 40
+step_size: 100
+step_gamma: 0.5
+epochs: 1001
+noise_scale: 0.0005
+T_ar: 1
+use_ln: 1
+normalize: 0
+T_bundle: 1
+grad_clip: 10000.0
+beta1: 0.9
+beta2: 0.9
+n_channels: 4
+n_class: 12
+
+##########################################
+############ Pointwise MLP transform
+##########################################
+# add_mlp: 1
+# mlp_hidden: 4
+# freeze_mlp: 1
+# load_mlp_path: "/mnt/shared-storage-user/brainllm-share/lvqitan/brainllm2-share/lvqitan/fine_tune_mhc_mlp_medium_model/DPOT_ns2d_0419_10_46_40S_1_9000/model.pth"
+
+##########################################
+############ Tiny models
+##########################################
+resume_path: 'path to your pretrained ckpt'
+load_components: ['all']
+n_layers: 4
+n_blocks: 4
+mlp_ratio: 1
+width: 512
+use_mhc: 0
+n_streams: 4
+sinkhorn_iter: 20
+alpha_init: 0.01
+complex_norm: 0
+sandwich_norm: 0
+use_layer_scale: 0
+use_far: 0
+
+########################################
+##########  Small models (mHC)
+########################################
+## Uncomment below and comment Tiny section to use Small model
+#resume_path: '<SMALL_MODEL_PRETRAIN_PATH>'
+# load_components: ['all']
+# n_layers: 6
+# n_blocks: 8
+# mlp_ratio: 1
+# width: 1024
+# use_mhc: 0
+# n_streams: 4
+# sinkhorn_iter: 20
+# alpha_init: 0.01
+# complex_norm: 1
+# sandwich_norm: 1
+# use_layer_scale: 0
+# use_far: 0
+
+
+##########################################
+############  Medium models (mHC)
+##########################################
+## Uncomment below and comment Tiny section to use Medium model
+#resume_path: '<MEDIUM_MODEL_PRETRAIN_PATH>'
+# load_components: ['all']
+# n_layers: 12
+# n_blocks: 8
+# mlp_ratio: 4
+# width: 1024
+# use_mhc: 0
+# n_streams: 4
+# sinkhorn_iter: 20
+# alpha_init: 0.01
+# complex_norm: 1
+# sandwich_norm: 1
+# use_layer_scale: 0
+# use_far: 0
+
+#
+##########################################
+############  Large models
+##########################################
+#resume_path: 'logs_pretrain/DPOT_large_model.pth'
+#load_components: ['all']
+#n_layers: 24
+#n_blocks: 16
+#mlp_ratio: 4
+#width: 1536
+#out_layer_dim: 128
+
+tasks:
+  comment: ['S']
+
+  epochs: [1001]
+  warmup_epochs: [40]
+  batch_size: [16]
+  noise_scale: [0.0]
+  # test_paths auto-mirrors train_paths via YAML anchor
+  # ntrain_list auto-reads from DATASET_DICT when omitted
+  train_paths: &paths [
+        # ['ns2d_fno_1e-5'],
+        ['ns2d_fno_1e-4'],
+        # ['ns2d_fno_1e-3'],
+        # ['ns2d_pdb_M1_eta1e-1_zeta1e-1'],
+        # ['ns2d_pdb_M1_eta1e-2_zeta1e-2'],
+        # ['ns2d_pdb_M1e-1_eta1e-1_zeta1e-1'],
+        # ['ns2d_pdb_M1e-1_eta1e-2_zeta1e-2'],
+        # ['swe_pdb'],
+      #   ['dr_pdb'],
+      #   ['ns2d_pda'],
+        # ['ns2d_cond_pda'],
+        # ['cfdbench'],
+        # ['ns2d_custom'],
+        # ['nskt16k'],
+        # ['kolmogorov'],
+  ]
+  test_paths: *paths

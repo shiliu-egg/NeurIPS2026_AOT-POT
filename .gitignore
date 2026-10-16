@@ -1,0 +1,25 @@
+# Python caches and local tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+/.tmp/
+/.venv/
+.DS_Store
+
+# Local environment files
+.env
+.env.*
+
+# Generated dataset registry and training artifacts
+/dataset_config.csv
+/data/
+/datasets/
+/checkpoints/
+/logs/
+/runs/
+*.h5
+*.hdf5
+*.pt
+*.pth
+*.ckpt
+events.out.tfevents.*

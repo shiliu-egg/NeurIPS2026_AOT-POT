@@ -1,0 +1,15 @@
+# Runtime dependencies for Python 3.9.25 on Linux.
+# PyTorch uses the CUDA 12.4 build from the official wheel index.
+# Install with: python -m pip install -r requirements.txt
+--extra-index-url https://download.pytorch.org/whl/cu124
+
+torch==2.4.0+cu124
+numpy==1.20.3
+accelerate==0.23.0
+h5py==3.7.0
+pandas==1.4.4
+scipy==1.10.1
+matplotlib==3.5.2
+einops==0.7.0
+tensorboard==2.14.1
+PyYAML==6.0.2
